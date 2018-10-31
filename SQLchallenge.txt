@@ -1,0 +1,105 @@
+Objective
+Improve the performance in terms of time and logical reads. 
+Background
+Here list of tables with their definition and columns are given for understanding purpose. 
+Table Name – Deal
+Contains list of deals. Deal is a transaction in which certain assets of a company are bought and/or sold.
+ID	Int (PK)
+CurrentDeal	Bit
+
+Table Name – DealEntity
+Participants in a deal are stored in this table. This entity could be buying or selling entity.
+ID	Int (PK)
+DealID	Int
+EntityID	Int
+
+Table Name – EntityToCompany
+Relation among deal participants and the companies that they represent. 
+ID	Int (PK)
+CompanyID	Int
+EntityID	Int
+
+Table Name – CompanyParent
+Master table for all the companies along with their parent companies
+ID	Int (PK)
+CompanyID	Int
+ParentCompanyID	Int
+IsActive	bit
+
+User Story
+As a Business analyst of S & P Global, I need optimized SQL Query to fetch complete list of Company IDs, which has any deals associated because I want to show this list to my product page.
+Acceptance Criteria
+1.	Result set of the query should be in a single column with name of column as CompanyID.
+2.	Final list should only contains company Ids whose deals are current deals. (CurrentDeal = True)
+3.	All parent companies until root needs to include in the result set if given company is having current deal. For example, if Company Z has current deals associated and if Parent of Company Z is Company Y and Parent of Company Y is Company X then final result should be X, Y, and Z not only Z
+4.	Only active companies list needs to be fetched.
+Query
+DECLARE @KeyCompany INT;
+
+CREATE TABLE #FinalResult(CompanyID INT);
+
+DECLARE DealInstn CURSOR
+FOR SELECT  e2i.CompanyID
+    FROM SPGlobal..EntityToCompany e2i
+         INNER JOIN SPGlobal..DealEntity e ON e2i.EntityID = e.EntityID
+         INNER JOIN SPGlobal.dbo.Deal x0_1 ON e.DealID = x0_1.ID
+                                                   AND x0_1.CurrentDeal = 1
+    GROUP BY e2i.CompanyID;
+
+OPEN DealInstn;
+FETCH NEXT FROM DealInstn INTO @KeyCompany;
+
+WHILE @@FETCH_STATUS = 0
+    BEGIN
+        IF NOT EXISTS
+(
+    SELECT CompanyID
+    FROM #FinalResult
+    WHERE CompanyID = @KeyCompany
+)
+            BEGIN
+                WITH tmpMultiParent(CompanyID,
+                                    CompanyIDparent,
+                                    InstnParentGeneralPartner,
+                                    level,
+                                    levels)
+                     AS (
+                     SELECT a.CompanyID,
+                            a.ParenCompanyID,
+                            a.IsActive,
+                            1 level,
+                            CAST(a.ParenCompanyID AS VARCHAR(MAX)) levels
+                     FROM SPGlobal.dbo.CompanyParent a
+                     WHERE a.ParenCompanyID = @KeyCompany
+                           AND a.IsActive = 1
+                     UNION ALL
+                     SELECT a.CompanyID,
+                            a.ParenCompanyID,
+                            a.IsActive,
+                            b.level + 1,
+                            b.levels+','+CAST(a.ParenCompanyID AS VARCHAR(MAX)) levels
+                     FROM SPGlobal.dbo.CompanyParent a
+                          INNER JOIN tmpMultiParent b ON a.ParenCompanyID = b.CompanyID
+                                                         AND b.InstnParentGeneralPartner = 1
+                     WHERE a.IsActive = 1
+                           AND (','+b.levels+',' NOT LIKE '%,'+CAST(a.CompanyID AS VARCHAR(MAX))+',%'))
+                     INSERT INTO #FinalResult
+                            SELECT CompanyID
+                            FROM tmpMultiParent;
+            END;
+        FETCH NEXT FROM DealInstn INTO @KeyCompany;
+    END;
+CLOSE DealInstn;
+DEALLOCATE DealInstn; 
+
+SELECT CompanyID
+FROM #FinalResult
+GROUP BY CompanyID;
+DROP TABLE #FinalResult;
+
+
+Sample Data
+ 
+ 
+ 
+ 
